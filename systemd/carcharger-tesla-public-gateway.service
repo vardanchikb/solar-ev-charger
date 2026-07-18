@@ -1,0 +1,14 @@
+[Unit]
+Description=CarCharger Tesla Public HTTP/HTTPS Gateway
+After=network-online.target carcharger-dashboard.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/carcharger
+ExecStart=%h/carcharger/.venv/bin/python3 %h/carcharger/tesla_public_gateway.py --config %h/carcharger/config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

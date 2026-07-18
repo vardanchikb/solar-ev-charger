@@ -1,0 +1,253 @@
+# Copy to config.yaml and edit for your environment.
+
+charger:
+  # Aimiler Tuya local credentials
+  id: "YOUR_TUYA_DEVICE_ID"
+  key: "YOUR_TUYA_LOCAL_KEY"
+  ip: "192.168.1.60"
+  version: 3.3
+
+  # Tuya datapoints (adjust after querying status)
+  # Known values for this Aimiler charger:
+  # - switch_dp: 18
+  # - current_dp: 4
+  # - mode_dp: 14
+  switch_dp: 18
+  current_dp: 4
+  mode_dp: 14
+
+  # Current unit expected by current_dp:
+  # - "amp" means raw amps (e.g. 10)
+  # - "deciamp" means 0.1A units (e.g. 100 for 10A)
+  current_unit: "amp"
+
+  # Electrical constraints
+  min_amps: 8
+  max_amps: 32
+  voltage: 230
+  phases: 1
+  status_retry_count: 3
+  status_retry_delay_seconds: 0.35
+  # Write raw local Tuya responses to raw_tuya_log_path for troubleshooting.
+  # The /system page exposes this as "Debug Tuya Responses".
+  debug_tuya_responses: false
+  # Keep false for short-lived Tuya sockets. Set true only after validating the
+  # charger behaves better with one reused local TCP channel.
+  socket_persistent: false
+  # When persistent sockets are enabled, recycle the channel periodically so a
+  # stale session cannot live forever. Set 0 to disable age-based recycling.
+  # WARNING: do not set this short (e.g. 120s). Some Tuya v3.4 firmwares wedge
+  # their local daemon after a few thousand accepted TCP sessions (they keep
+  # answering ping/cloud but silently drop the local key handshake, which
+  # tinytuya reports as error 914) and only a power cycle recovers them. See
+  # https://github.com/jasonacox/tinytuya/issues/581. Prefer long sessions and
+  # use updatedps_refresh below to keep DPS values fresh in-band.
+  socket_persistent_recycle_seconds: 900
+  # Some charger firmwares reply with cached DPS values for the whole life of a
+  # persistent connection. When true, send UPDATEDPS (command 18) before each
+  # status poll so the device refreshes DP values on the same session instead
+  # of relying on frequent reconnects. Fire-and-forget; devices that do not
+  # support command 18 ignore it. Verify against your device: watch a known
+  # changing value (e.g. charging power) stay live while the socket ages.
+  updatedps_refresh: false
+  rediscovery_enabled: true
+  rediscovery_scan_seconds: 10
+  rediscovery_interval_hours: 24
+
+automation:
+  # When charger status fetches keep failing (e.g. the charger's local Tuya
+  # daemon wedges and stops answering the session handshake), stretch the poll
+  # interval exponentially instead of hammering it every cycle. Backoff starts
+  # after this many consecutive recorded fetch errors (each failing cycle
+  # records two) and the sleep is capped at the max below. Set the max to 0 to
+  # disable backoff entirely.
+  fetch_error_backoff_after_failures: 6
+  fetch_error_backoff_max_seconds: 600
+  active_profile: "spring"
+  profiles:
+    spring: &seasonal_profile_defaults
+      # Keep non-emergency automation above the Aimiler minimum. Some firmware can
+      # fault if actual vehicle draw briefly exceeds an 8A pilot.
+      automation_min_amps: 10
+      min_current_change_interval_seconds: 180
+
+      # Treat a failed startup with the charger still off as a suspected charger
+      # fault/interlock, log the raw DPS, and make one soft-reset attempt per cooldown.
+      fault_reset_enabled: true
+      fault_reset_cooldown_seconds: 900
+      fault_reset_off_seconds: 3
+      log_charger_events: true
+      charger_event_log_path: "/home/YOUR_USER/carcharger/charger_event_log.jsonl"
+      startup_failure_cooldown_seconds: 900
+      # Hold downward EV amp changes or low-solar stops for this long before
+      # acting, so short appliance spikes do not immediately pull charging down.
+      energy_down_sustain_seconds: 180
+
+      # Poll Google Nest HVAC status from the local API.
+      hvac_status_url: "http://127.0.0.1:8789/api/hvac-status"
+      hvac_timeout_seconds: 5
+
+      # If HVAC status is unavailable, keep existing charge behavior by default.
+      allow_when_hvac_unavailable: true
+
+      # The controller will switch the charger into charge_now when it needs control.
+      auto_force_charge_now_mode: true
+      startup_grace_seconds: 30
+      log_fetch_details: true
+      poll_seconds: 15
+      no_charge_start: "16:00"
+      no_charge_end: "21:00"
+      night_charge_start: "21:00"
+      night_new_start_cutoff: "03:00"
+      night_charge_amps: 32
+      night_completion_grace_seconds: 90
+      night_force_enable_without_connection: true
+      emergency_amps: 32
+      # Tesla-backed solar-follow controller.
+      #
+      # Mental model for the similar-looking knobs below:
+      # - solar_buffer_* reserves solar watts for the house/Powerwall before the
+      #   EV gets any budget.
+      # - solar_gap_* smooths small amp changes around the charger setpoint.
+      # - ramp_* limits how quickly the chosen setpoint can move per loop.
+      # - charger_command_min_interval_seconds limits how often commands are
+      #   sent to the charger hardware.
+      # - energy_down_sustain_seconds, above, delays downward moves/stops after
+      #   short home-load spikes.
+      energy_controller:
+        config_version: 1
+
+        # Estimated appliance load used only while Tesla telemetry has not yet
+        # caught up with a newly observed HVAC state change.
+        hvac_load_watts: 3600
+
+        # EV electrical limits used to convert available watts into amps.
+        ev_voltage: 230
+        ev_min_amps: 8
+        ev_solar_max_amps: 24
+        ev_hard_max_amps: 32
+
+        # Manual emergency mode: bypasses solar logic and charges at fixed amps.
+        emergency_charging_enabled: false
+        emergency_charge_amps: 32
+
+        # Powerwall and solar budget rules.
+        # Reserved for after-4PM recovery comparisons. Before 4PM, charging is
+        # governed by the min/max solar margin caps below, not Powerwall SOC.
+        pre_4pm_powerwall_protect_soc: 80
+        after_4pm_powerwall_nearly_full_soc: 95
+        after_4pm_full_powerwall_export_buffer_watts: 300
+        full_soc: 100
+        # Before 4PM, min/max are a solar margin deadband:
+        # - solar - home below min: trim EV by 1A, or stop if already at min amps
+        # - between min and max: hold EV amps
+        # - above max: raise EV by 1A
+        # Keep at least 300W between min and max to prevent chatter.
+        # solar_buffer_watts is retained as an after-4PM/fallback buffer.
+        solar_buffer_watts: 300
+        solar_buffer_min_watts: 200
+        solar_buffer_max_watts: 500
+        # Legacy setpoint deadband fields retained for compatibility. Pre-4PM
+        # solar-follow uses solar_buffer_min/max instead.
+        solar_gap_boost_watts: 500
+        solar_gap_trim_watts: 200
+
+        # Time windows. The 16:00-21:00 window is no-charge except emergency
+        # and the optional full-Powerwall solar-follow exception.
+        cloudy_day_force_charge_time: "11:00"
+        no_charge_start_time: "16:00"
+        night_charge_start_time: "21:00"
+        night_charge_end_time: "03:00"
+        night_charge_amps: 32
+
+        # Tesla freshness. Stale telemetry is tolerated briefly; critically stale
+        # telemetry follows critical_stale_action because solar math is no longer
+        # trustworthy.
+        tesla_stale_after_seconds: 600
+        tesla_critical_stale_after_seconds: 1800
+        critical_stale_action: stop
+
+        # Smoothing and hardware pacing.
+        control_loop_seconds: 60
+        charger_command_min_interval_seconds: 180
+        min_amp_delta_before_update: 1
+        ramp_up_amps_per_loop: 2
+        ramp_down_amps_per_loop: 4
+        low_solar_stop_grace_loop_count: 2
+        emergency_reduction_bypasses_grace_period: false
+
+        # Feature toggles.
+        dry_run: false
+        enable_cloudy_day_fallback: true
+        enable_predictive_hvac_adjustment: true
+        enable_powerwall_protection_before_4pm: true
+        enable_after_4pm_recovery_behavior: true
+        enable_after_4pm_full_powerwall_solar_charging: true
+        enable_charger_auto_start: true
+        enable_charger_auto_stop: true
+        enable_emergency_charging_mode: true
+    summer:
+      <<: *seasonal_profile_defaults
+      # Optional Tesla DB-backed solar surplus control.
+      # Uses the latest tesla_energy_live_samples row; it does not call Tesla live.
+      automation_min_amps: 8
+      hvac_refresh_seconds: 120
+      tesla_solar_control_enabled: false
+      tesla_solar_max_sample_age_seconds: 900
+      tesla_solar_generation_cap_watts: 6300
+      tesla_solar_reserve_watts: 500
+      tesla_solar_grid_import_stop_watts: 150
+      tesla_solar_cloudy_min_amps: 8
+      tesla_solar_powerwall_full_boost_pct: 98
+      tesla_solar_powerwall_reserve_pct: 80
+    fall:
+      <<: *seasonal_profile_defaults
+    winter:
+      <<: *seasonal_profile_defaults
+
+database:
+  enabled: false
+  bootstrap: true
+  socket: "/run/mysqld/mysqld.sock"
+  host: "127.0.0.1"
+  port: 3306
+  user: "carcharger"
+  password_file: "/home/YOUR_USER/carcharger/.secrets/mysql_password"
+  database: "carcharger"
+  table: "charging_sessions"
+  telemetry_table: "charger_telemetry_samples"
+
+tesla_energy:
+  enabled: false
+  client_id: "YOUR_TESLA_CLIENT_ID"
+  client_secret_file: "/home/YOUR_USER/carcharger/.secrets/tesla_client_secret"
+  token_file: "/home/YOUR_USER/carcharger/.secrets/tesla_tokens.json"
+  cache_file: "/home/YOUR_USER/carcharger/tesla_energy_cache.json"
+  sync_state_file: "/home/YOUR_USER/carcharger/tesla_energy_sync_state.json"
+  redirect_uri: "http://localhost:5000/callback"
+  audience: "https://fleet-api.prd.na.vn.cloud.tesla.com"
+  api_base_url: "https://fleet-api.prd.na.vn.cloud.tesla.com"
+  scope: "openid offline_access energy_device_data"
+  energy_site_id: ""
+  partner_domain: ""
+  partner_public_key_file: "/var/www/tesla/.well-known/appspecific/com.tesla.3p.public-key.pem"
+  public_bind_host: "0.0.0.0"
+  public_http_port: 8078
+  public_https_port: 9443
+  public_static_root: "/var/www/tesla"
+  public_proxy_target: "http://127.0.0.1:8788"
+  tls_cert_file: "/home/YOUR_USER/carcharger/.secrets/tls/YOUR_DOMAIN/fullchain.pem"
+  tls_key_file: "/home/YOUR_USER/carcharger/.secrets/tls/YOUR_DOMAIN/privkey.pem"
+  poll_seconds: 60
+  history_hours: 24
+  history_max_points: 288
+  live_table: "tesla_energy_live_samples"
+  history_table: "tesla_energy_history"
+  monthly_request_budget: 5000
+  monthly_request_reserve: 200
+  history_backfill_days: 90
+  site_info_refresh_hours: 24
+  history_refresh_hours: 24
+  sync_idle_sleep_seconds: 60
+  temporary_live_poll_interval_seconds: null
+  temporary_allow_request_budget_overrun: false

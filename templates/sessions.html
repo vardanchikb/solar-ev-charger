@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="head-row">
+    <div>
+      <p class="eyebrow">History</p>
+      <h2>Charging Sessions</h2>
+    </div>
+    <span id="sessions-updated" class="saved">Loading</span>
+  </div>
+
+  <p id="sessions-note" class="muted">Loading charging history...</p>
+
+  <div class="status-grid sessions-summary-grid">
+    <article class="metric-card">
+      <h3>Summary</h3>
+      <dl class="metric-list">
+        <div><dt>Total Sessions</dt><dd id="summary-total-sessions">-</dd></div>
+        <div><dt>Total Energy</dt><dd id="summary-total-energy">-</dd></div>
+        <div><dt>Today</dt><dd id="summary-today-energy">-</dd></div>
+        <div><dt>Last 7 Days</dt><dd id="summary-week-energy">-</dd></div>
+        <div><dt>Peak Power</dt><dd id="summary-peak-power">-</dd></div>
+        <div><dt>Peak Current</dt><dd id="summary-peak-amps">-</dd></div>
+        <div><dt>Latest Start</dt><dd id="summary-latest-start">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Database</h3>
+      <dl class="metric-list">
+        <div><dt>Logging</dt><dd id="db-enabled">-</dd></div>
+        <div><dt>Ready</dt><dd id="db-ready">-</dd></div>
+        <div><dt>Database</dt><dd id="db-name">-</dd></div>
+        <div><dt>Table</dt><dd id="db-table">-</dd></div>
+        <div><dt>Error</dt><dd id="db-error">-</dd></div>
+      </dl>
+    </article>
+  </div>
+
+  <section class="card inset-card">
+    <div class="head-row">
+      <div>
+        <p class="eyebrow">Recent Rows</p>
+        <h3>Latest Sessions</h3>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="sessions-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Phase</th>
+            <th>Target</th>
+            <th>Peak Power</th>
+            <th>Peak Amps</th>
+            <th>Energy</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="sessions-body">
+          <tr><td colspan="9">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+
+<script>
+const sessionsUrl = "{{ url_for('api_sessions') }}";
+
+function text(id, value) {
+  document.getElementById(id).textContent = value ?? "-";
+}
+
+function fmtEnergy(wh) {
+  if (wh == null) return "-";
+  return wh >= 1000 ? `${(wh / 1000).toFixed(2)}kWh` : `${Number(wh).toFixed(1)}Wh`;
+}
+
+function fmtPower(watts) {
+  if (watts == null) return "-";
+  return `${Math.round(Number(watts))}W`;
+}
+
+function fmtAmps(amps) {
+  if (amps == null) return "-";
+  return `${Number(amps).toFixed(2)}A`;
+}
+
+function yesNo(value) {
+  return value ? "yes" : "no";
+}
+
+function renderRows(rows) {
+  const tbody = document.getElementById("sessions-body");
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9">No sessions recorded yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${row.id}</td>
+      <td>${row.started_at || "-"}</td>
+      <td>${row.ended_at || "-"}</td>
+      <td>${row.start_phase || "-"}</td>
+      <td>${row.target_amps ? `${row.target_amps}A` : "-"}</td>
+      <td>${fmtPower(row.max_power_w)}</td>
+      <td>${fmtAmps(row.max_actual_amps)}</td>
+      <td>${fmtEnergy(row.energy_wh)}</td>
+      <td>${row.status || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+async function fetchSessions() {
+  const response = await fetch(`${sessionsUrl}?limit=40`, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to load sessions");
+  }
+
+  const summary = payload.summary || {};
+  const database = payload.database || {};
+
+  text("sessions-updated", new Date().toLocaleTimeString());
+  text("summary-total-sessions", summary.total_sessions ?? 0);
+  text("summary-total-energy", fmtEnergy(summary.total_energy_wh));
+  text("summary-today-energy", fmtEnergy(summary.today_energy_wh));
+  text("summary-week-energy", fmtEnergy(summary.last_7d_energy_wh));
+  text("summary-peak-power", fmtPower(summary.peak_power_w));
+  text("summary-peak-amps", fmtAmps(summary.peak_actual_amps));
+  text("summary-latest-start", summary.latest_start_at || "-");
+
+  text("db-enabled", yesNo(database.enabled));
+  text("db-ready", yesNo(database.ready));
+  text("db-name", database.database || "-");
+  text("db-table", database.table || "-");
+  text("db-error", database.last_error || "none");
+
+  renderRows(payload.sessions || []);
+  text("sessions-note", database.enabled
+    ? "Recent charge sessions are read live from MySQL."
+    : "MySQL session logging is disabled.");
+}
+
+fetchSessions().catch((error) => {
+  text("sessions-note", error.message);
+});
+setInterval(() => {
+  fetchSessions().catch((error) => {
+    text("sessions-note", error.message);
+  });
+}, 15000);
+</script>
+{% endblock %}

@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card" id="energy-controller-config">
+  <div class="head-row">
+    <div>
+      <p class="eyebrow">Charger Profiles</p>
+      <h2>Charging Logic Settings</h2>
+    </div>
+    {% if saved %}<span class="saved">Saved</span>{% endif %}
+    <span id="energy-config-saved" class="saved" hidden>Saved</span>
+  </div>
+
+  <form method="post" class="grid compact-form">
+    <label>
+      Profile
+      <select id="profile-select" name="automation_active_profile">
+        {% for profile in automation_profiles %}
+          <option value="{{ profile }}" {% if active_profile == profile %}selected{% endif %}>{{ profile|title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="actions">
+      <button class="btn alt" type="submit">Make Active</button>
+    </div>
+  </form>
+
+  <p class="muted" id="energy-config-meta">Loading profile config.</p>
+  <div id="energy-config-error" class="status-banner error" hidden></div>
+  <div id="energy-config-tabs" class="config-tabs" role="tablist" aria-label="Charger config sections"></div>
+  <form id="energy-config-form" class="grid"></form>
+  <div class="actions">
+    <button id="energy-config-save" class="btn" type="button">Save Profile</button>
+    <button id="energy-config-reset" class="btn alt" type="button">Reset Profile Defaults</button>
+  </div>
+</section>
+
+<script>
+const energyConfigBaseUrl = "{{ url_for('api_energy_config_get') }}";
+const energyConfigSaveUrl = "{{ url_for('api_energy_config_put') }}";
+const energyConfigResetUrl = "{{ url_for('api_energy_config_reset') }}";
+const profileSelect = document.getElementById("profile-select");
+
+const groupHelp = {
+  "Profile Safety": "These settings live on the selected seasonal profile itself. They protect the charger from local integration hiccups, startup weirdness, and short home-load spikes before the Tesla energy decision is even sent to the charger.",
+  "Limits": "Hard electrical boundaries. The solar controller can choose amps inside this range, but it will never go below the charger minimum or above the configured hard maximum.",
+  "Hours": "Daily time windows. The 4PM to 9PM no-charge window blocks normal charging unless emergency mode or the full-Powerwall solar exception applies.",
+  "Night and Emergency": "Fixed-amp behaviors that intentionally bypass normal solar following. Use these for overnight charging and manual emergency charging.",
+  "Solar and Powerwall": "The live daytime rule is simple: solar generation minus home usage is the free margin. Below the lower value trims down, between the values holds, above the upper value raises by 1A.",
+  "Predictive Loads": "Temporary load estimates used only when HVAC changed after the latest Tesla sample. Once Tesla catches up, Tesla becomes the source of truth again.",
+  "Control": "Stale-data handling, command pacing, and reduction delays. These knobs decide when a computed change is allowed to reach the charger.",
+  "Switches": "Feature toggles. Turn these off only when intentionally disabling a behavior for testing or seasonal tuning.",
+};
+
+const tabDefinitions = [
+  {
+    id: "solar",
+    label: "Solar Logic",
+    help: "The normal daytime charger math. Before 4PM, only the free-solar min/max values decide whether amps move down, hold, or move up.",
+  },
+  {
+    id: "loads",
+    label: "Known Loads",
+    help: "Tesla sample freshness and HVAC load assumptions used to explain home consumption.",
+  },
+  {
+    id: "charger",
+    label: "Charger",
+    help: "Electrical amp limits, night charging, emergency charging, and charger start/stop permissions.",
+  },
+  {
+    id: "seasonal",
+    label: "Seasonal",
+    help: "Selected seasonal profile behavior, startup handling, and local integration safety checks.",
+  },
+  {
+    id: "controller",
+    label: "Controller",
+    help: "Loop timing, command cooldowns, stale data actions, and advanced feature toggles.",
+  },
+];
+
+let activeConfigTab = "solar";
+let currentProfileSettings = {};
+
+function fieldTab(field) {
+  if (field.source === "profile") {
+    return "seasonal";
+  }
+  if (["Solar and Powerwall", "Hours"].includes(field.group)) {
+    return "solar";
+  }
+  if (field.group === "Predictive Loads" || field.key.startsWith("tesla_") || field.key === "critical_stale_action") {
+    return "loads";
+  }
+  if (["Limits", "Night and Emergency"].includes(field.group) || ["enable_charger_auto_start", "enable_charger_auto_stop", "enable_emergency_charging_mode"].includes(field.key)) {
+    return "charger";
+  }
+  return "controller";
+}
+
+const profileConfigFields = [
+  {
+    group: "Profile Safety",
+    source: "profile",
+    key: "automation_min_amps",
+    label: "Automation Min Amps",
+    type: "number",
+    step: "1",
+    help: "Lowest non-emergency target this seasonal profile should offer. Summer is usually 8A for solar/cloudy charging; other profiles may use 10A for extra charger margin.",
+  },
+  {
+    group: "Profile Safety",
+    source: "profile",
+    key: "energy_down_sustain_seconds",
+    label: "Down-Hold Before Reducing",
+    type: "number",
+    step: "1",
+    help: "How long a lower solar target or low-solar stop must remain true before the charger is reduced. 180 seconds means a coffee-maker-style load has to last about 3 minutes before EV amps go down.",
+  },
+  {
+    group: "Profile Safety",
+    source: "profile",
+    key: "startup_grace_seconds",
+    label: "Startup Grace",
+    type: "number",
+    step: "1",
+    help: "After the charger is enabled, wait this long for the vehicle to actually request current before considering startup failed. Higher values help slow car wakeups.",
+  },
+  {
+    group: "Profile Safety",
+    source: "profile",
+    key: "startup_failure_cooldown_seconds",
+    label: "Startup Retry Cooldown",
+    type: "number",
+    step: "1",
+    help: "If startup really fails, wait this long before retrying. This prevents repeated start commands while the car or charger is not ready.",
+  },
+  {
+    group: "Profile Safety",
+    source: "profile",
+    key: "poll_seconds",
+    label: "Automation Poll Seconds",
+    type: "number",
+    step: "1",
+    help: "How often the automation service checks charger, HVAC, and cached Tesla state. Faster polling observes changes sooner but does not bypass command cooldowns.",
+  },
+];
+
+const energyConfigFields = [
+  { group: "Limits", key: "ev_min_amps", label: "EV Min Amps", type: "number", step: "1", help: "Minimum pilot amps the energy controller may request. Aimiler and most EVs need at least 8A, so lowering below that is blocked." },
+  { group: "Limits", key: "ev_solar_max_amps", label: "Solar Max Amps", type: "number", step: "1", help: "Highest amps allowed during solar-follow charging. Keep below hard max if you want daytime charging capped even when solar is excellent." },
+  { group: "Limits", key: "ev_hard_max_amps", label: "Hard Max Amps", type: "number", step: "1", readonly: true, help: "Absolute charger maximum from hardware config. This is read-only here so profile tuning cannot exceed the charger rating." },
+  { group: "Hours", key: "cloudy_day_force_charge_time", label: "Cloudy Fallback Time", type: "time", help: "After this time, cloudy fallback may allow minimum-amp charging before the 4PM no-charge window, even when solar math alone would be too low." },
+  { group: "Hours", key: "no_charge_start_time", label: "No Charge Start", type: "time", help: "Start of the normal no-charge window. Non-emergency charging stops here unless the full-Powerwall solar exception is active." },
+  { group: "Hours", key: "night_charge_start_time", label: "Night Charge Start", type: "time", help: "Start of fixed-amp night charging when the vehicle is connected." },
+  { group: "Hours", key: "night_charge_end_time", label: "Night Charge End", type: "time", help: "New night charging will not start after this time. A night session already charging can continue under the night-session rules." },
+  { group: "Night and Emergency", key: "night_charge_amps", label: "Night Charge Amps", type: "number", step: "1", help: "Fixed target amps during the night window." },
+  { group: "Night and Emergency", key: "emergency_charge_amps", label: "Emergency Amps", type: "number", step: "1", help: "Fixed target amps when emergency charging mode is active." },
+  { group: "Night and Emergency", key: "emergency_mode_duration_minutes", label: "Emergency Duration", type: "number", step: "1", help: "Optional auto-expire duration for emergency mode. Leave blank for no duration limit." },
+  { group: "Night and Emergency", key: "emergency_low_soc_stop_threshold", label: "Low SOC Stop", type: "number", step: "0.1", help: "Optional hard safety stop when Powerwall SOC falls below this percentage. Leave blank to disable this extra stop." },
+  { group: "Solar and Powerwall", key: "pre_4pm_powerwall_protect_soc", label: "Recovery Protect SOC", type: "number", step: "0.1", help: "Used only by after-4PM recovery behavior. Before 4PM, Powerwall SOC does not change the min/max solar math." },
+  { group: "Solar and Powerwall", key: "after_4pm_powerwall_nearly_full_soc", label: "Recovery SOC", type: "number", step: "0.1", help: "Powerwall SOC considered nearly full for after-4PM recovery behavior." },
+  {
+    group: "Solar and Powerwall",
+    key: "after_4pm_full_powerwall_export_buffer_watts",
+    label: "Full PW Export Buffer",
+    type: "select",
+    options: [
+      { value: 200, label: "100-200 W" },
+      { value: 300, label: "200-300 W" },
+      { value: 400, label: "300-400 W" },
+      { value: 500, label: "400-500 W" },
+      { value: 600, label: "500-600 W" },
+      { value: 700, label: "600-700 W" },
+      { value: 800, label: "700-800 W" },
+      { value: 900, label: "800-900 W" },
+      { value: 1000, label: "900-1000 W" },
+    ],
+    help: "During the no-charge window, full-Powerwall solar charging can continue only while leaving this much export headroom.",
+  },
+  { group: "Solar and Powerwall", key: "full_soc", label: "Full SOC", type: "number", step: "0.1", help: "SOC value treated as full for the after-4PM full-Powerwall solar exception." },
+  { group: "Solar and Powerwall", key: "solar_buffer_min_watts", label: "Decrease Below Free Watts", type: "number", step: "1", help: "Before 4PM, if solar generation minus home usage is below this many watts, reduce EV charging by 1A or stop if already at minimum." },
+  { group: "Solar and Powerwall", key: "solar_buffer_max_watts", label: "Increase Above Free Watts", type: "number", step: "1", help: "Before 4PM, if solar generation minus home usage is above this many watts, raise EV charging by 1A. Between the two values, hold current amps." },
+  { group: "Predictive Loads", key: "hvac_load_watts", label: "HVAC Load (W)", type: "number", step: "1", help: "Cooling load estimate added only when HVAC turns on after the latest Tesla sample. Heating uses a smaller built-in estimate." },
+  { group: "Control", key: "tesla_stale_after_seconds", label: "Tesla Stale (s)", type: "number", step: "1", help: "Tesla sample age where the dashboard/controller marks telemetry stale. Solar math can still continue cautiously until critical stale." },
+  { group: "Control", key: "tesla_critical_stale_after_seconds", label: "Tesla Critical Stale (s)", type: "number", step: "1", help: "Tesla sample age where the controller considers solar math too old to trust and follows Critical Stale Action." },
+  { group: "Control", key: "critical_stale_action", label: "Critical Stale Action", type: "select", options: ["stop", "min_charge"], help: "What to do when Tesla telemetry is critically stale. Stop is safest; min_charge keeps only minimum amps." },
+  { group: "Control", key: "control_loop_seconds", label: "Energy Loop Seconds", type: "number", step: "1", help: "Decision-engine timing value used in calculations. The automation poll interval above controls how often the service actually loops." },
+  { group: "Control", key: "charger_command_min_interval_seconds", label: "Command Cooldown (s)", type: "number", step: "1", help: "Minimum time between charger commands, including amp changes and start/stop. This protects the charger from rapid command chatter." },
+  { group: "Control", key: "min_amp_delta_before_update", label: "Min Amp Delta", type: "number", step: "1", help: "Small amp changes below this delta are ignored. Keep at 1 for normal whole-amp charger control." },
+  { group: "Control", key: "ramp_up_amps_per_loop", label: "Ramp Up / Loop", type: "number", step: "1", help: "Maximum amp increase per decision loop after the gap deadband allows an increase." },
+  { group: "Control", key: "ramp_down_amps_per_loop", label: "Ramp Down / Loop", type: "number", step: "1", help: "Maximum amp decrease per decision loop after the down-hold allows a decrease." },
+  { group: "Control", key: "low_solar_stop_grace_loop_count", label: "Low Solar Grace Loops", type: "number", step: "1", help: "Decision-engine grace before requesting a low-solar stop. The profile down-hold can further delay the actual reduction while charging is active." },
+  { group: "Switches", key: "enable_cloudy_day_fallback", label: "Cloudy Fallback", type: "checkbox", help: "Allow minimum-amp charging after the fallback time when solar is weak but the time window permits it." },
+  { group: "Switches", key: "enable_predictive_hvac_adjustment", label: "Predictive HVAC", type: "checkbox", help: "React to HVAC state changes before Tesla telemetry catches up." },
+  { group: "Switches", key: "enable_powerwall_protection_before_4pm", label: "Powerwall Protect", type: "checkbox", help: "Use Powerwall-protection behavior before the no-charge window." },
+  { group: "Switches", key: "enable_after_4pm_recovery_behavior", label: "After-4PM Recovery", type: "checkbox", help: "Allow recovery behavior after 4PM when configured conditions are met." },
+  { group: "Switches", key: "enable_after_4pm_full_powerwall_solar_charging", label: "After-4PM Full PW Solar", type: "checkbox", help: "Allow solar-follow charging in the no-charge window only when Powerwall is full enough and export buffer is preserved." },
+  { group: "Switches", key: "enable_charger_auto_start", label: "Auto Start", type: "checkbox", help: "Allow automation to turn charger output on when charging should begin." },
+  { group: "Switches", key: "enable_charger_auto_stop", label: "Auto Stop", type: "checkbox", help: "Allow automation to stop charger output when charging should end." },
+  { group: "Switches", key: "enable_emergency_charging_mode", label: "Emergency Mode Enabled", type: "checkbox", help: "Allow emergency mode to be used from the UI/API." },
+  { group: "Switches", key: "emergency_reduction_bypasses_grace_period", label: "Bypass Grace", type: "checkbox", help: "Let emergency-related reductions bypass low-solar grace. Keep off unless you want emergency safety reductions to act immediately." },
+  { group: "Switches", key: "dry_run", label: "Dry Run", type: "checkbox", help: "Compute and report decisions without sending charger commands. Useful for testing only." },
+];
+
+const allConfigFields = [...profileConfigFields, ...energyConfigFields];
+
+let currentEnergyConfig = null;
+
+function energyConfigUrl() {
+  return `${energyConfigBaseUrl}?profile=${encodeURIComponent(profileSelect.value)}`;
+}
+
+function showEnergyConfigMessage(message = "", isError = false) {
+  const errorNode = document.getElementById("energy-config-error");
+  const savedNode = document.getElementById("energy-config-saved");
+  if (isError) {
+    errorNode.hidden = false;
+    errorNode.textContent = message;
+    savedNode.hidden = true;
+    return;
+  }
+  errorNode.hidden = true;
+  errorNode.textContent = "";
+  savedNode.hidden = !message;
+  savedNode.textContent = message || "Saved";
+}
+
+function appendGroup(form, groupName) {
+  const heading = document.createElement("p");
+  heading.className = "section-label full";
+  heading.textContent = groupName;
+  form.appendChild(heading);
+  if (groupHelp[groupName]) {
+    const help = document.createElement("p");
+    help.className = "group-help full";
+    help.textContent = groupHelp[groupName];
+    form.appendChild(help);
+  }
+}
+
+function renderConfigTabs() {
+  const tabRoot = document.getElementById("energy-config-tabs");
+  tabRoot.replaceChildren();
+  const visibleTabs = tabDefinitions.filter((tab) =>
+    allConfigFields.some((field) => fieldTab(field) === tab.id)
+  );
+  if (!visibleTabs.some((tab) => tab.id === activeConfigTab)) {
+    activeConfigTab = visibleTabs[0]?.id || "solar";
+  }
+  for (const tab of visibleTabs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "config-tab-button";
+    button.id = `config-tab-${tab.id}`;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", `config-panel-${tab.id}`);
+    button.setAttribute("aria-selected", tab.id === activeConfigTab ? "true" : "false");
+    button.textContent = tab.label;
+    button.addEventListener("click", () => {
+      activeConfigTab = tab.id;
+      updateVisibleConfigTab();
+    });
+    tabRoot.appendChild(button);
+  }
+}
+
+function updateVisibleConfigTab() {
+  for (const tab of tabDefinitions) {
+    const selected = tab.id === activeConfigTab;
+    const button = document.getElementById(`config-tab-${tab.id}`);
+    const panel = document.getElementById(`config-panel-${tab.id}`);
+    if (button) {
+      button.setAttribute("aria-selected", selected ? "true" : "false");
+    }
+    if (panel) {
+      panel.hidden = !selected;
+    }
+  }
+}
+
+function fieldValue(payload, field) {
+  if (field.source === "profile") {
+    return (payload.profile_settings || {})[field.key];
+  }
+  return payload.effective[field.key];
+}
+
+function renderEnergyConfigForm(payload) {
+  currentEnergyConfig = payload.effective;
+  currentProfileSettings = payload.profile_settings || {};
+  profileSelect.value = payload.active_profile;
+  document.getElementById("energy-config-meta").textContent =
+    `${payload.active_profile.toUpperCase()} profile. Config version ${payload.config_version || "-"} updated ${payload.updated_at || "never"}.`;
+  renderConfigTabs();
+  const form = document.getElementById("energy-config-form");
+  form.replaceChildren();
+  for (const tab of tabDefinitions) {
+    const panel = document.createElement("section");
+    panel.className = "config-tab-panel grid";
+    panel.id = `config-panel-${tab.id}`;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", `config-tab-${tab.id}`);
+    const intro = document.createElement("p");
+    intro.className = "group-help full";
+    intro.textContent = tab.help;
+    panel.appendChild(intro);
+    const visibleFields = allConfigFields.filter((candidate) => fieldTab(candidate) === tab.id);
+    if (visibleFields.length === 0) {
+      continue;
+    }
+    let currentGroup = "";
+    for (const field of visibleFields) {
+      if (field.group !== currentGroup) {
+        currentGroup = field.group;
+        appendGroup(panel, currentGroup);
+      }
+      const label = document.createElement("label");
+      label.appendChild(document.createTextNode(field.label));
+      const value = fieldValue(payload, field);
+      let input;
+      if (field.type === "select") {
+        input = document.createElement("select");
+        for (const optionConfig of field.options) {
+          const optionValue = typeof optionConfig === "object" ? optionConfig.value : optionConfig;
+          const option = document.createElement("option");
+          option.value = optionValue;
+          option.textContent = typeof optionConfig === "object" ? optionConfig.label : optionValue;
+          if (String(value) === String(optionValue)) {
+            option.selected = true;
+          }
+          input.appendChild(option);
+        }
+      } else {
+        input = document.createElement("input");
+        input.type = field.type;
+        if (field.step) {
+          input.step = field.step;
+        }
+        if (field.type === "checkbox") {
+          input.checked = Boolean(value);
+        } else {
+          input.value = value ?? "";
+        }
+      }
+      input.name = field.key;
+      if (field.readonly) {
+        input.readOnly = true;
+        input.disabled = true;
+      }
+      label.appendChild(input);
+      if (field.help) {
+        const help = document.createElement("span");
+        help.className = "field-help";
+        help.textContent = field.help;
+        label.appendChild(help);
+      }
+      panel.appendChild(label);
+    }
+    form.appendChild(panel);
+  }
+  updateVisibleConfigTab();
+}
+
+async function fetchEnergyConfig() {
+  const response = await fetch(energyConfigUrl(), { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || "Failed to load energy config");
+  }
+  renderEnergyConfigForm(payload);
+}
+
+function collectEnergyConfigPayload() {
+  const form = document.getElementById("energy-config-form");
+  const payload = { active_profile: profileSelect.value };
+  for (const field of allConfigFields) {
+    const input = form.querySelector(`[name="${field.key}"]`);
+    if (!input) {
+      continue;
+    }
+    if (field.readonly) {
+      continue;
+    }
+    if (field.type === "checkbox") {
+      payload[field.key] = input.checked;
+    } else if (field.type === "number") {
+      payload[field.key] = input.value === "" ? null : Number(input.value);
+    } else {
+      payload[field.key] = input.value;
+    }
+  }
+  const minCap = Number(payload.solar_buffer_min_watts);
+  const maxCap = Number(payload.solar_buffer_max_watts);
+  if (Number.isFinite(minCap) && Number.isFinite(maxCap) && maxCap - minCap < 300) {
+    throw new Error("Increase Above Free Watts must be at least 300W above Decrease Below Free Watts.");
+  }
+  return payload;
+}
+
+async function postEnergyConfig(url, method, payload = null) {
+  const response = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: payload ? JSON.stringify(payload) : null,
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || "Request failed");
+  }
+  return data;
+}
+
+profileSelect.addEventListener("change", () => {
+  showEnergyConfigMessage();
+  fetchEnergyConfig().catch((error) => showEnergyConfigMessage(error.message, true));
+});
+
+document.getElementById("energy-config-save").addEventListener("click", async () => {
+  try {
+    showEnergyConfigMessage();
+    await postEnergyConfig(energyConfigSaveUrl, "PUT", collectEnergyConfigPayload());
+    await fetchEnergyConfig();
+    showEnergyConfigMessage("Saved");
+  } catch (error) {
+    showEnergyConfigMessage(error.message, true);
+  }
+});
+
+document.getElementById("energy-config-reset").addEventListener("click", async () => {
+  try {
+    showEnergyConfigMessage();
+    await postEnergyConfig(`${energyConfigResetUrl}?profile=${encodeURIComponent(profileSelect.value)}`, "POST");
+    await fetchEnergyConfig();
+    showEnergyConfigMessage("Reset to defaults");
+  } catch (error) {
+    showEnergyConfigMessage(error.message, true);
+  }
+});
+
+fetchEnergyConfig().catch((error) => {
+  showEnergyConfigMessage(error.message, true);
+});
+</script>
+{% endblock %}

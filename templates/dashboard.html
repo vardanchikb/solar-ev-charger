@@ -1,0 +1,756 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="head-row">
+    <div>
+      <p class="eyebrow">Live Status</p>
+      <h2>Charging Dashboard</h2>
+      <div class="profile-strip">
+        <span>Active profile</span>
+        <strong id="active-profile-name">Loading</strong>
+      </div>
+    </div>
+    <span id="last-updated" class="saved">Loading</span>
+  </div>
+
+  <div class="actions">
+    <button id="emergency-start" class="btn">Start Emergency Charging</button>
+    <button id="emergency-stop" class="btn alt warn">Stop Emergency Charging</button>
+    <a class="btn alt" href="{{ url_for('charger_page') }}">Edit Charger Settings</a>
+  </div>
+
+  <p id="action-note" class="muted"></p>
+  <div id="status-banner" class="status-banner" hidden></div>
+  <div id="alert-list" class="alert-list" hidden></div>
+
+  <div class="status-grid">
+    <article class="metric-card">
+      <h3>Charger</h3>
+      <dl class="metric-list">
+        <div><dt>Mode</dt><dd id="charger-mode">-</dd></div>
+        <div><dt>State</dt><dd id="charger-state">-</dd></div>
+        <div><dt>Insert Sense</dt><dd id="charger-insert">-</dd></div>
+        <div><dt>Connected</dt><dd id="charger-connected">-</dd></div>
+        <div><dt>Idle EV Match</dt><dd id="charger-idle-match">-</dd></div>
+        <div><dt>Charging</dt><dd id="charger-active">-</dd></div>
+        <div><dt>Setpoint</dt><dd id="charger-amps">-</dd></div>
+        <div><dt>Power</dt><dd id="charger-power">-</dd></div>
+        <div><dt>Telemetry</dt><dd id="charger-telemetry">-</dd></div>
+        <div><dt>Fetch</dt><dd id="charger-fetch">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Automation</h3>
+      <dl class="metric-list">
+        <div><dt>Phase</dt><dd id="auto-phase">-</dd></div>
+        <div><dt>Action</dt><dd id="auto-action">-</dd></div>
+        <div><dt>Reason</dt><dd id="auto-reason">-</dd></div>
+        <div><dt>Profile</dt><dd id="auto-profile">-</dd></div>
+        <div><dt>Target</dt><dd id="auto-target">-</dd></div>
+        <div><dt>Emergency</dt><dd id="auto-emergency">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>HVAC</h3>
+      <dl class="metric-list">
+        <div><dt>Status</dt><dd id="hvac-status">-</dd></div>
+        <div><dt>Running</dt><dd id="hvac-running">-</dd></div>
+        <div><dt>Heating</dt><dd id="hvac-heating">-</dd></div>
+        <div><dt>Cooling</dt><dd id="hvac-cooling">-</dd></div>
+        <div><dt>Mode</dt><dd id="hvac-mode">-</dd></div>
+        <div><dt>Observed</dt><dd id="hvac-observed-at">-</dd></div>
+        <div><dt>Error</dt><dd id="hvac-error">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Database</h3>
+      <dl class="metric-list">
+        <div><dt>Logging</dt><dd id="db-enabled">-</dd></div>
+        <div><dt>Database</dt><dd id="db-name">-</dd></div>
+        <div><dt>Table</dt><dd id="db-table">-</dd></div>
+        <div><dt>Active Session</dt><dd id="db-session-id">-</dd></div>
+        <div><dt>Session Energy</dt><dd id="db-session-energy">-</dd></div>
+        <div><dt>Error</dt><dd id="db-error">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Tesla Energy</h3>
+      <dl class="metric-list">
+        <div><dt>Auth</dt><dd id="tesla-auth">-</dd></div>
+        <div><dt>Site</dt><dd id="tesla-site">-</dd></div>
+        <div><dt>Solar</dt><dd id="tesla-solar">-</dd></div>
+        <div><dt>Powerwall</dt><dd id="tesla-powerwall">-</dd></div>
+        <div><dt>Home Load</dt><dd id="tesla-home">-</dd></div>
+        <div><dt>Grid Import</dt><dd id="tesla-grid-import">-</dd></div>
+        <div><dt>Grid Export</dt><dd id="tesla-grid-export">-</dd></div>
+        <div><dt>Grid Status</dt><dd id="tesla-grid-status">-</dd></div>
+        <div><dt>Last Update</dt><dd id="tesla-updated">-</dd></div>
+        <div><dt>Error</dt><dd id="tesla-error">-</dd></div>
+      </dl>
+    </article>
+  </div>
+
+  <section class="energy-panel">
+    <div class="head-row">
+      <div>
+        <p class="eyebrow">Tesla Fleet</p>
+        <h3>Home Energy Chart</h3>
+      </div>
+      <span id="energy-note" class="muted">Waiting for Tesla energy data.</span>
+    </div>
+
+    <div class="range-controls">
+      <div class="range-buttons">
+        <button class="range-btn active" type="button" data-range="1d">1D</button>
+        <button class="range-btn" type="button" data-range="2d">2D</button>
+        <button class="range-btn" type="button" data-range="7d">7D</button>
+        <button class="range-btn" type="button" data-range="30d">30D</button>
+        <button class="range-btn" type="button" data-range="90d">90D</button>
+      </div>
+      <div class="range-custom">
+        <label>
+          Start
+          <input id="custom-start" type="date" />
+        </label>
+        <label>
+          End
+          <input id="custom-end" type="date" />
+        </label>
+        <button id="apply-custom-range" class="btn alt" type="button">Apply</button>
+      </div>
+    </div>
+
+    <div class="energy-legend">
+      <span class="legend-chip solar">Solar</span>
+      <span class="legend-chip powerwall">Powerwall %</span>
+      <span class="legend-chip consumption">Home Load</span>
+      <span class="legend-chip grid-export">Grid Export</span>
+      <span class="legend-chip grid-import">Grid Import</span>
+    </div>
+
+    <div id="energy-chart" class="energy-chart empty">Tesla energy history will appear here after authorization and a few successful polls.</div>
+  </section>
+
+  <details class="raw-box">
+    <summary>Raw Charger DPS</summary>
+    <pre id="raw-dps">Loading...</pre>
+  </details>
+</section>
+
+<script>
+const statusUrl = "{{ url_for('api_status') }}";
+const teslaHistoryUrl = "{{ url_for('api_tesla_energy_history') }}";
+const emergencyStartUrl = "{{ url_for('api_emergency_start') }}";
+const emergencyStopUrl = "{{ url_for('api_emergency_stop') }}";
+let lastSuccessfulTimestamp = null;
+let selectedEnergyRange = "1d";
+
+function text(id, value) {
+  document.getElementById(id).textContent = value ?? "-";
+}
+
+function boolText(value) {
+  return value ? "yes" : "no";
+}
+
+function formatPower(value) {
+  if (value == null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  const watts = Number(value);
+  if (Math.abs(watts) >= 1000) {
+    return `${(watts / 1000).toFixed(2)}kW`;
+  }
+  return `${Math.round(watts)}W`;
+}
+
+function formatPercent(value) {
+  if (value == null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function markStale(message) {
+  const suffix = lastSuccessfulTimestamp
+    ? ` Last good update: ${lastSuccessfulTimestamp.toLocaleTimeString()}.`
+    : "";
+  text("last-updated", "Stale");
+  document.getElementById("last-updated").classList.add("saved-stale");
+  text("action-note", `${message}.${suffix}`);
+}
+
+function clearStale() {
+  document.getElementById("last-updated").classList.remove("saved-stale");
+}
+
+function renderBanner(payload) {
+  const banner = document.getElementById("status-banner");
+  if (payload.live_error) {
+    banner.hidden = false;
+    banner.className = "status-banner error";
+    banner.textContent = payload.source === "cache"
+      ? `Live charger read failed. Showing cached status. ${payload.live_error}`
+      : payload.live_error;
+    return;
+  }
+  if (payload.stale) {
+    banner.hidden = false;
+    banner.className = "status-banner warn";
+    banner.textContent = "Showing cached charger status.";
+    return;
+  }
+  banner.hidden = true;
+  banner.textContent = "";
+}
+
+function renderAlerts(alerts) {
+  const host = document.getElementById("alert-list");
+  host.replaceChildren();
+
+  if (!Array.isArray(alerts) || alerts.length === 0) {
+    host.hidden = true;
+    return;
+  }
+
+  for (const alert of alerts) {
+    const item = document.createElement("div");
+    item.className = `alert-chip ${alert.severity || "info"}`;
+    item.textContent = alert.message || alert.code || "Alert";
+    host.appendChild(item);
+  }
+
+  host.hidden = false;
+}
+
+function createSvgElement(name, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attributes)) {
+    element.setAttribute(key, String(value));
+  }
+  return element;
+}
+
+function setActiveRange(rangeName) {
+  selectedEnergyRange = rangeName;
+  for (const button of document.querySelectorAll(".range-btn")) {
+    button.classList.toggle("active", button.dataset.range === rangeName);
+  }
+}
+
+function formatChartUnit(value, unit) {
+  if (value == null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  if (unit === "Wh") {
+    const wh = Number(value);
+    if (Math.abs(wh) >= 1000) {
+      return `${(wh / 1000).toFixed(1)}kWh`;
+    }
+    return `${Math.round(wh)}Wh`;
+  }
+  return formatPower(value);
+}
+
+function renderEnergyChart(chartPayload) {
+  const host = document.getElementById("energy-chart");
+  if (host._energyChartCleanup) host._energyChartCleanup();
+  host.replaceChildren();
+  const history = chartPayload?.points || [];
+  const unit = chartPayload?.unit || "W";
+  const mode = chartPayload?.mode || "power";
+  const powerwallSupported = chartPayload?.powerwall_supported !== false;
+
+  if (!Array.isArray(history) || history.length < 2) {
+    host.classList.add("empty");
+    host.textContent = "Tesla energy history will appear here after authorization and a few successful polls.";
+    return;
+  }
+
+  const width = 920;
+  const height = 320;
+  const padding = { top: 18, right: 52, bottom: 32, left: 56 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const chartStartX = padding.left;
+  const chartEndX = width - padding.right;
+  const chartStartY = padding.top;
+  const chartEndY = height - padding.bottom;
+
+  const points = history
+    .map((entry) => ({
+      timestamp: new Date(entry.timestamp),
+      solar: Number(entry.solar_generation_w ?? entry.solar_generation_wh ?? NaN),
+      powerwall: Number(entry.powerwall_level_pct ?? NaN),
+      home: Number(entry.home_consumption_w ?? entry.home_consumption_wh ?? NaN),
+      gridImport: Number(entry.grid_import_w ?? entry.grid_import_wh ?? NaN),
+      gridExport: Number(entry.grid_export_w ?? entry.grid_export_wh ?? NaN),
+    }))
+    .filter((entry) => !Number.isNaN(entry.timestamp.getTime()));
+
+  if (points.length < 2) {
+    host.classList.add("empty");
+    host.textContent = "Tesla energy history is not ready yet.";
+    return;
+  }
+
+  host.classList.remove("empty");
+  const maxPrimaryValue = Math.max(
+    1000,
+    ...points.flatMap((entry) => [entry.solar, entry.home, entry.gridImport, entry.gridExport].filter(Number.isFinite))
+  );
+  const firstTimestamp = points[0].timestamp.getTime();
+  const lastTimestamp = points[points.length - 1].timestamp.getTime();
+  const spanMs = Math.max(1, lastTimestamp - firstTimestamp);
+
+  function xFor(timestamp) {
+    return chartStartX + ((timestamp.getTime() - firstTimestamp) / spanMs) * innerWidth;
+  }
+
+  function yForPrimary(value) {
+    return chartEndY - (Math.max(0, value) / maxPrimaryValue) * innerHeight;
+  }
+
+  function yForPercent(value) {
+    return chartEndY - (Math.max(0, Math.min(100, value)) / 100) * innerHeight;
+  }
+
+  function polylinePoints(values, yResolver) {
+    return points
+      .filter((entry) => Number.isFinite(values(entry)))
+      .map((entry) => `${xFor(entry.timestamp)},${yResolver(values(entry))}`)
+      .join(" ");
+  }
+
+  const svg = createSvgElement("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: "none",
+    class: "energy-svg",
+    "aria-label": "Tesla energy chart",
+  });
+
+  const gridGroup = createSvgElement("g", { class: "energy-grid" });
+  for (let index = 0; index <= 4; index += 1) {
+    const ratio = index / 4;
+    const y = chartEndY - ratio * innerHeight;
+    gridGroup.appendChild(
+      createSvgElement("line", {
+        x1: chartStartX,
+        y1: y,
+        x2: chartEndX,
+        y2: y,
+        class: "grid-line",
+      })
+    );
+    const leftLabel = createSvgElement("text", {
+      x: chartStartX - 10,
+      y: y + 4,
+      class: "axis-label",
+      "text-anchor": "end",
+    });
+    leftLabel.textContent = formatChartUnit(maxPrimaryValue * ratio, unit);
+    gridGroup.appendChild(leftLabel);
+
+    if (powerwallSupported) {
+      const rightLabel = createSvgElement("text", {
+        x: chartEndX + 10,
+        y: y + 4,
+        class: "axis-label",
+        "text-anchor": "start",
+      });
+      rightLabel.textContent = `${Math.round(ratio * 100)}%`;
+      gridGroup.appendChild(rightLabel);
+    }
+  }
+  svg.appendChild(gridGroup);
+
+  const series = [
+    { key: "solar", stroke: "#f6c85f", values: (entry) => entry.solar, yResolver: yForPrimary },
+    { key: "powerwall", stroke: "#5cd6ff", values: (entry) => entry.powerwall, yResolver: yForPercent, hidden: !powerwallSupported },
+    { key: "home", stroke: "#8ef8c6", values: (entry) => entry.home, yResolver: yForPrimary },
+    { key: "gridExport", stroke: "#5d9cff", values: (entry) => entry.gridExport, yResolver: yForPrimary },
+    { key: "gridImport", stroke: "#ff8b7d", values: (entry) => entry.gridImport, yResolver: yForPrimary },
+  ];
+
+  for (const seriesItem of series) {
+    if (seriesItem.hidden) {
+      continue;
+    }
+    const pointsText = polylinePoints(seriesItem.values, seriesItem.yResolver);
+    if (!pointsText) {
+      continue;
+    }
+    svg.appendChild(
+      createSvgElement("polyline", {
+        points: pointsText,
+        fill: "none",
+        stroke: seriesItem.stroke,
+        "stroke-width": 3,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+      })
+    );
+  }
+
+  const hoverLine = createSvgElement("line", {
+    x1: chartStartX,
+    y1: chartStartY,
+    x2: chartStartX,
+    y2: chartEndY,
+    class: "hover-line",
+    visibility: "hidden",
+  });
+  svg.appendChild(hoverLine);
+
+  const hoverDot = createSvgElement("circle", {
+    cx: chartStartX,
+    cy: chartEndY,
+    r: 4,
+    class: "hover-dot",
+    visibility: "hidden",
+  });
+  svg.appendChild(hoverDot);
+
+  const startLabel = createSvgElement("text", {
+    x: chartStartX,
+    y: height - 8,
+    class: "axis-label",
+    "text-anchor": "start",
+  });
+  startLabel.textContent = points[0].timestamp.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: mode === "power" ? "numeric" : undefined,
+    minute: mode === "power" ? "2-digit" : undefined,
+  });
+  svg.appendChild(startLabel);
+
+  const endLabel = createSvgElement("text", {
+    x: chartEndX,
+    y: height - 8,
+    class: "axis-label",
+    "text-anchor": "end",
+  });
+  endLabel.textContent = points[points.length - 1].timestamp.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: mode === "power" ? "numeric" : undefined,
+    minute: mode === "power" ? "2-digit" : undefined,
+  });
+  svg.appendChild(endLabel);
+
+  host.appendChild(svg);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "energy-tooltip";
+  tooltip.hidden = true;
+  host.appendChild(tooltip);
+
+  const tooltipRows = [
+    ["Solar", "solar", "solar"],
+    ["Powerwall", "powerwall", "powerwall"],
+    ["Home Load", "home", "consumption"],
+    ["Grid Export", "gridExport", "grid-export"],
+    ["Grid Import", "gridImport", "grid-import"],
+  ];
+
+  function valueForTooltip(point, key) {
+    if (key === "powerwall") {
+      return Number.isFinite(point.powerwall) ? formatPercent(point.powerwall) : "-";
+    }
+    return formatChartUnit(point[key], unit);
+  }
+
+  function renderTooltip(point, clientX, clientY = null) {
+    tooltip.replaceChildren();
+    const title = document.createElement("strong");
+    title.textContent = point.timestamp.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    tooltip.appendChild(title);
+
+    for (const [label, key, cssKey] of tooltipRows) {
+      const row = document.createElement("span");
+      row.className = cssKey;
+      const rowLabel = document.createElement("b");
+      rowLabel.textContent = label;
+      const rowValue = document.createElement("em");
+      rowValue.textContent = valueForTooltip(point, key);
+      row.append(rowLabel, rowValue);
+      tooltip.appendChild(row);
+    }
+
+    const hostRect = host.getBoundingClientRect();
+    const relativeX = clientX - hostRect.left;
+    const relativeY = clientY == null ? 14 : clientY - hostRect.top;
+    const isCompact = hostRect.width < 520;
+    const tooltipWidth = isCompact
+      ? Math.max(180, Math.min(hostRect.width - 20, 240))
+      : Math.min(260, Math.max(220, hostRect.width * 0.72));
+    const left = isCompact
+      ? Math.max(10, Math.min(hostRect.width - tooltipWidth - 10, relativeX - tooltipWidth / 2))
+      : relativeX > hostRect.width * 0.58
+        ? Math.max(10, relativeX - tooltipWidth - 14)
+        : Math.min(hostRect.width - tooltipWidth - 10, relativeX + 14);
+    const top = isCompact
+      ? Math.max(10, Math.min(hostRect.height - 132, relativeY + 16))
+      : 14;
+    tooltip.style.width = `${tooltipWidth}px`;
+    tooltip.style.left = `${Math.max(10, left)}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.hidden = false;
+  }
+
+  function updateHover(clientX, clientY = null) {
+    const rect = svg.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const targetTime = firstTimestamp + ratio * spanMs;
+    let nearest = points[0];
+    let nearestDistance = Math.abs(points[0].timestamp.getTime() - targetTime);
+    for (const point of points) {
+      const distance = Math.abs(point.timestamp.getTime() - targetTime);
+      if (distance < nearestDistance) {
+        nearest = point;
+        nearestDistance = distance;
+      }
+    }
+
+    const x = xFor(nearest.timestamp);
+    const dotValue = Number.isFinite(nearest.home)
+      ? nearest.home
+      : Number.isFinite(nearest.solar)
+        ? nearest.solar
+        : Number.isFinite(nearest.gridImport)
+          ? nearest.gridImport
+          : 0;
+    hoverLine.setAttribute("x1", x);
+    hoverLine.setAttribute("x2", x);
+    hoverLine.setAttribute("visibility", "visible");
+    hoverDot.setAttribute("cx", x);
+    hoverDot.setAttribute("cy", yForPrimary(dotValue));
+    hoverDot.setAttribute("visibility", "visible");
+    renderTooltip(nearest, clientX, clientY);
+  }
+
+  function clearHover() {
+    hoverLine.setAttribute("visibility", "hidden");
+    hoverDot.setAttribute("visibility", "hidden");
+    tooltip.hidden = true;
+  }
+
+  host.addEventListener("mousemove", (event) => updateHover(event.clientX, event.clientY));
+  host.addEventListener("mouseleave", clearHover);
+  host.addEventListener("touchstart", (event) => {
+    if (event.touches[0]) {
+      updateHover(event.touches[0].clientX, event.touches[0].clientY);
+    }
+  }, { passive: true });
+  host.addEventListener("touchmove", (event) => {
+    if (event.touches[0]) {
+      updateHover(event.touches[0].clientX, event.touches[0].clientY);
+    }
+  }, { passive: true });
+
+  // Clear tooltip when the browser window loses focus (mouse exits the browser entirely)
+  const onWindowBlur = () => clearHover();
+  window.addEventListener("blur", onWindowBlur);
+
+  // On mobile: tapping anywhere outside the chart immediately clears the tooltip
+  const onDocTouch = (e) => { if (!host.contains(e.target)) clearHover(); };
+  document.addEventListener("touchstart", onDocTouch, { passive: true });
+
+  host._energyChartCleanup = () => {
+    window.removeEventListener("blur", onWindowBlur);
+    document.removeEventListener("touchstart", onDocTouch);
+  };
+}
+
+async function fetchEnergyHistory(rangeName = selectedEnergyRange, start = "", end = "") {
+  const params = new URLSearchParams();
+  params.set("range", rangeName);
+  if (start) {
+    params.set("start", start);
+  }
+  if (end) {
+    params.set("end", end);
+  }
+  const response = await fetch(`${teslaHistoryUrl}?${params.toString()}`, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to load Tesla chart history");
+  }
+  renderEnergyChart(payload);
+  document.getElementById("energy-note").textContent =
+    payload.mode === "energy"
+      ? "Showing imported Tesla energy history from MySQL. Powerwall percentage is only available on live-sampled ranges."
+      : "Showing live Tesla power samples from MySQL. Powerwall percent uses the right-side scale.";
+}
+
+async function fetchStatus() {
+  const response = await fetch(statusUrl, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to load status");
+  }
+  renderStatus(payload);
+}
+
+function renderStatus(payload) {
+  const charger = payload.charger || {};
+  const automation = payload.automation || {};
+  const state = automation.state || {};
+  const emergency = state.emergency || {};
+  const hvac = payload.hvac || {};
+  const database = payload.database || {};
+  const tesla = payload.tesla_energy || {};
+  const teslaMetrics = tesla.metrics || {};
+  const fetch = payload.fetch || {};
+  const startupSuffix = automation.startup_active
+    ? ` (${automation.base_phase || automation.phase}, ${automation.startup_seconds_remaining}s left)`
+    : automation.base_phase && automation.base_phase !== automation.phase
+      ? ` (${automation.base_phase})`
+      : "";
+
+  lastSuccessfulTimestamp = new Date(payload.timestamp);
+  clearStale();
+  text("last-updated", new Date(payload.timestamp).toLocaleTimeString());
+  text("charger-mode", charger.mode);
+  text("charger-state", charger.state);
+  text("charger-insert", charger.insert_sensed ? "insert-like signal" : "not detected");
+  text("charger-connected", boolText(charger.vehicle_connected));
+  text("charger-idle-match", charger.idle_connected ? "car-idle pattern" : "no");
+  text("charger-active", boolText(charger.actively_charging));
+  text("charger-amps", charger.setpoint_amps != null ? `${charger.setpoint_amps}A` : "-");
+  text("charger-power", charger.power_w != null ? `${Math.round(charger.power_w)}W` : "-");
+  text("charger-telemetry", fetch.used_cached_merge ? "cached merge" : (payload.source === "cache" ? "report cache" : "live"));
+  text("charger-fetch", fetch.duration_ms != null ? `${fetch.duration_ms}ms` : "-");
+
+  text("auto-phase", `${automation.phase || "-"}${startupSuffix}`);
+  text("auto-action", automation.action);
+  text("auto-reason", automation.reason);
+  text("auto-profile", automation.profile || "-");
+  text("active-profile-name", automation.profile ? automation.profile.toUpperCase() : "-");
+  text("auto-target", automation.target_amps != null ? `${automation.target_amps}A` : "-");
+  text("auto-emergency", emergency.active ? "active" : "off");
+
+  text("hvac-status", hvac.hvac_status || "-");
+  text("hvac-running", boolText(hvac.is_running));
+  text("hvac-heating", boolText(hvac.is_heating));
+  text("hvac-cooling", boolText(hvac.is_cooling));
+  text("hvac-mode", hvac.thermostat_mode || "-");
+  text("hvac-observed-at", hvac.observed_at ? new Date(hvac.observed_at).toLocaleTimeString() : "-");
+  text("hvac-error", payload.hvac_error || "none");
+
+  text("db-enabled", database.enabled ? "enabled" : "disabled");
+  text("db-name", database.database || "-");
+  text("db-table", database.table || "-");
+  text("db-session-id", database.active_session_id != null ? String(database.active_session_id) : "-");
+  text("db-session-energy", database.active_session_energy_wh != null ? `${Number(database.active_session_energy_wh).toFixed(1)}Wh` : "-");
+  text("db-error", database.last_error || "none");
+
+  text("tesla-auth", tesla.authorized ? "authorized" : (tesla.configured ? "needs OAuth token" : "not configured"));
+  text("tesla-site", teslaMetrics.site_name || tesla.energy_site_id || "-");
+  text("tesla-solar", formatPower(teslaMetrics.solar_generation_w));
+  text("tesla-powerwall", formatPercent(teslaMetrics.powerwall_level_pct));
+  text("tesla-home", formatPower(teslaMetrics.home_consumption_w));
+  text("tesla-grid-import", formatPower(teslaMetrics.grid_import_w));
+  text("tesla-grid-export", formatPower(teslaMetrics.grid_export_w));
+  text("tesla-grid-status", teslaMetrics.grid_status || "-");
+  text("tesla-updated", tesla.last_updated ? new Date(tesla.last_updated).toLocaleTimeString() : "-");
+  text("tesla-error", tesla.error || "none");
+  document.getElementById("energy-note").textContent =
+    tesla.error
+      ? tesla.error
+      : tesla.authorized
+        ? "Loading Tesla chart data from MySQL."
+        : "Authorize Tesla Fleet energy or paste a refresh token in Charger Settings to populate this chart.";
+  if (tesla.authorized) {
+    fetchEnergyHistory(selectedEnergyRange).catch((error) => {
+      document.getElementById("energy-note").textContent = error.message;
+      renderEnergyChart({ points: tesla.history || [] });
+    });
+  } else {
+    renderEnergyChart({ points: tesla.history || [] });
+  }
+  renderBanner(payload);
+  renderAlerts(payload.alerts || []);
+
+  document.getElementById("raw-dps").textContent = JSON.stringify(payload.charger_dps || {}, null, 2);
+  document.getElementById("action-note").textContent =
+    emergency.active
+      ? "Emergency override is active. The session will keep running until you stop it or the car stops charging."
+      : automation.startup_active
+      ? "The charger has been enabled and is within the startup grace window. A delayed transition to active charging is expected."
+      : automation.tesla_solar_control_enabled
+        ? "Tesla solar control is active. Daytime charging follows Tesla DB solar surplus and grid-import avoidance until the blocked evening window starts."
+        : "Night charging starts after 21:00 if a car is connected. Active HVAC cooling drops EV charging to 8A, and 16:00-21:00 remains blocked.";
+}
+
+async function postAction(url) {
+  const response = await fetch(url, { method: "POST" });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Action failed");
+  }
+  await fetchStatus();
+}
+
+document.getElementById("emergency-start").addEventListener("click", async () => {
+  try {
+    await postAction(emergencyStartUrl);
+  } catch (error) {
+    text("action-note", error.message);
+  }
+});
+
+document.getElementById("emergency-stop").addEventListener("click", async () => {
+  try {
+    await postAction(emergencyStopUrl);
+  } catch (error) {
+    text("action-note", error.message);
+  }
+});
+
+for (const button of document.querySelectorAll(".range-btn")) {
+  button.addEventListener("click", async () => {
+    setActiveRange(button.dataset.range);
+    try {
+      await fetchEnergyHistory(button.dataset.range);
+    } catch (error) {
+      document.getElementById("energy-note").textContent = error.message;
+    }
+  });
+}
+
+document.getElementById("apply-custom-range").addEventListener("click", async () => {
+  const start = document.getElementById("custom-start").value;
+  const end = document.getElementById("custom-end").value;
+  if (!start || !end) {
+    document.getElementById("energy-note").textContent = "Choose both custom start and end dates.";
+    return;
+  }
+  setActiveRange("");
+  try {
+    await fetchEnergyHistory("custom", `${start}T00:00:00+00:00`, `${end}T23:59:59+00:00`);
+  } catch (error) {
+    document.getElementById("energy-note").textContent = error.message;
+  }
+});
+
+fetchStatus().catch((error) => {
+  markStale(error.message);
+});
+setInterval(() => {
+  fetchStatus().catch((error) => {
+    markStale(error.message);
+  });
+}, 10000);
+</script>
+{% endblock %}

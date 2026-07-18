@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="head-row">
+    <div>
+      <p class="eyebrow">Energy Controller</p>
+      <h2>Charging Dashboard</h2>
+      <div class="profile-strip">
+        <span>Active profile</span>
+        <strong id="active-profile-name">Loading</strong>
+      </div>
+    </div>
+    <span id="last-updated" class="saved">Loading</span>
+  </div>
+
+  <div class="actions">
+    <button id="emergency-start" class="btn">Start Emergency Charging</button>
+    <button id="emergency-stop" class="btn alt warn">Stop Emergency Charging</button>
+    <a class="btn alt" href="{{ url_for('charger_page') }}">Low-Level Charger Settings</a>
+  </div>
+
+  <p id="action-note" class="muted"></p>
+  <div id="status-banner" class="status-banner" hidden></div>
+  <div id="alert-list" class="alert-list" hidden></div>
+
+  <div class="status-grid">
+    <article class="metric-card">
+      <h3>Controller</h3>
+      <dl class="metric-list">
+        <div><dt>Mode</dt><dd id="live-mode">-</dd></div>
+        <div><dt>Reason</dt><dd id="live-reason">-</dd></div>
+        <div><dt>Status</dt><dd id="live-status">-</dd></div>
+        <div><dt>Next Target</dt><dd id="live-target">-</dd></div>
+        <div><dt>Cooldown</dt><dd id="live-cooldown">-</dd></div>
+        <div><dt>Last Command</dt><dd id="live-command">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Tesla</h3>
+      <dl class="metric-list">
+        <div><dt>Telemetry</dt><dd id="tesla-telemetry-state">-</dd></div>
+        <div><dt>Solar</dt><dd id="tesla-solar">-</dd></div>
+        <div><dt>Home</dt><dd id="tesla-home">-</dd></div>
+        <div><dt>Adjusted</dt><dd id="tesla-adjusted">-</dd></div>
+        <div><dt>Powerwall</dt><dd id="tesla-powerwall">-</dd></div>
+        <div><dt>Grid Import</dt><dd id="tesla-grid-import">-</dd></div>
+        <div><dt>Grid Export</dt><dd id="tesla-grid-export">-</dd></div>
+        <div><dt>Last Update</dt><dd id="tesla-updated">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Loads</h3>
+      <dl class="metric-list">
+        <div><dt>Predictive Load</dt><dd id="predictive-load">-</dd></div>
+        <div><dt>Non-EV Home</dt><dd id="non-ev-load">-</dd></div>
+        <div><dt>Available For EV</dt><dd id="available-ev">-</dd></div>
+        <div><dt>HVAC</dt><dd id="hvac-running">-</dd></div>
+        <div><dt>EV Estimate</dt><dd id="ev-estimate">-</dd></div>
+      </dl>
+    </article>
+
+    <article class="metric-card">
+      <h3>Charger</h3>
+      <dl class="metric-list">
+        <div><dt>Mode</dt><dd id="charger-mode">-</dd></div>
+        <div><dt>State</dt><dd id="charger-state">-</dd></div>
+        <div><dt>Connected</dt><dd id="charger-connected">-</dd></div>
+        <div><dt>Charging</dt><dd id="charger-active">-</dd></div>
+        <div><dt>Setpoint</dt><dd id="charger-amps">-</dd></div>
+        <div><dt>Power</dt><dd id="charger-power">-</dd></div>
+        <div><dt>Fetch</dt><dd id="charger-fetch">-</dd></div>
+        <div><dt>Session</dt><dd id="db-session-id">-</dd></div>
+      </dl>
+    </article>
+  </div>
+
+  <section class="card" style="margin-top: 1rem;">
+    <div class="head-row">
+      <div>
+        <p class="eyebrow">Live Config</p>
+        <h3>Energy Controller Settings</h3>
+      </div>
+      <div class="actions">
+        <button id="save-config" class="btn" type="button">Save</button>
+        <button id="reset-config" class="btn alt" type="button">Reset Defaults</button>
+      </div>
+    </div>
+    <p class="muted" id="config-meta">Loading config.</p>
+    <div id="config-error" class="status-banner error" hidden></div>
+    <form id="energy-config-form" class="grid"></form>
+  </section>
+
+  <details class="raw-box">
+    <summary>Raw Charger DPS</summary>
+    <pre id="raw-dps">Loading...</pre>
+  </details>
+</section>
+
+<script>
+const statusUrl = "{{ url_for('api_energy_status') }}";
+const configUrl = "{{ url_for('api_energy_config_get') }}";
+const saveConfigUrl = "{{ url_for('api_energy_config_put') }}";
+const resetConfigUrl = "{{ url_for('api_energy_config_reset') }}";
+const emergencyStartUrl = "{{ url_for('api_energy_emergency_start') }}";
+const emergencyStopUrl = "{{ url_for('api_energy_emergency_stop') }}";
+
+const configFields = [
+  { key: "hvac_load_watts", label: "HVAC Load (W)", type: "number", step: "1" },
+  { key: "ev_voltage", label: "EV Voltage", type: "number", step: "0.1" },
+  { key: "ev_min_amps", label: "EV Min Amps", type: "number", step: "1" },
+  { key: "ev_solar_max_amps", label: "Solar Max Amps", type: "number", step: "1" },
+  { key: "ev_hard_max_amps", label: "Hard Max Amps", type: "number", step: "1", readonly: true },
+  { key: "emergency_charge_amps", label: "Emergency Amps", type: "number", step: "1" },
+  { key: "night_charge_amps", label: "Night Charge Amps", type: "number", step: "1" },
+  { key: "pre_4pm_powerwall_protect_soc", label: "Pre-4PM Protect SOC", type: "number", step: "0.1" },
+  { key: "after_4pm_powerwall_nearly_full_soc", label: "Recovery SOC", type: "number", step: "0.1" },
+  { key: "full_soc", label: "Full SOC", type: "number", step: "0.1" },
+  { key: "emergency_low_soc_stop_threshold", label: "Low SOC Stop", type: "number", step: "0.1" },
+  { key: "solar_buffer_watts", label: "After-4PM Buffer", type: "number", step: "1" },
+  { key: "solar_buffer_min_watts", label: "Pre-4PM Min Cap", type: "number", step: "1" },
+  { key: "solar_buffer_max_watts", label: "Pre-4PM Max Cap", type: "number", step: "1" },
+  { key: "cloudy_day_force_charge_time", label: "Cloudy Fallback Time", type: "time" },
+  { key: "no_charge_start_time", label: "No Charge Start", type: "time" },
+  { key: "night_charge_start_time", label: "Night Charge Start", type: "time" },
+  { key: "night_charge_end_time", label: "Night Charge End", type: "time" },
+  { key: "tesla_stale_after_seconds", label: "Tesla Stale (s)", type: "number", step: "1" },
+  { key: "tesla_critical_stale_after_seconds", label: "Tesla Critical Stale (s)", type: "number", step: "1" },
+  { key: "control_loop_seconds", label: "Loop Interval (s)", type: "number", step: "1" },
+  { key: "charger_command_min_interval_seconds", label: "Command Cooldown (s)", type: "number", step: "1" },
+  { key: "min_amp_delta_before_update", label: "Min Amp Delta", type: "number", step: "1" },
+  { key: "ramp_up_amps_per_loop", label: "Ramp Up / Loop", type: "number", step: "1" },
+  { key: "ramp_down_amps_per_loop", label: "Ramp Down / Loop", type: "number", step: "1" },
+  { key: "low_solar_stop_grace_loop_count", label: "Low Solar Grace Loops", type: "number", step: "1" },
+  { key: "emergency_mode_duration_minutes", label: "Emergency Duration", type: "number", step: "1" },
+  { key: "critical_stale_action", label: "Critical Stale Action", type: "select", options: ["stop", "min_charge"] },
+  { key: "dry_run", label: "Dry Run", type: "checkbox" },
+  { key: "enable_cloudy_day_fallback", label: "Cloudy Fallback", type: "checkbox" },
+  { key: "enable_predictive_hvac_adjustment", label: "Predictive HVAC", type: "checkbox" },
+  { key: "enable_powerwall_protection_before_4pm", label: "Powerwall Protect", type: "checkbox" },
+  { key: "enable_after_4pm_recovery_behavior", label: "After-4PM Recovery", type: "checkbox" },
+  { key: "enable_charger_auto_start", label: "Auto Start", type: "checkbox" },
+  { key: "enable_charger_auto_stop", label: "Auto Stop", type: "checkbox" },
+  { key: "enable_emergency_charging_mode", label: "Emergency Mode Enabled", type: "checkbox" },
+  { key: "emergency_reduction_bypasses_grace_period", label: "Bypass Grace", type: "checkbox" },
+];
+
+let currentEffectiveConfig = null;
+
+function text(id, value) {
+  document.getElementById(id).textContent = value ?? "-";
+}
+
+function boolText(value) {
+  return value ? "yes" : "no";
+}
+
+function formatPower(value) {
+  if (value == null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  const watts = Number(value);
+  return Math.abs(watts) >= 1000 ? `${(watts / 1000).toFixed(2)}kW` : `${Math.round(watts)}W`;
+}
+
+function formatPercent(value) {
+  if (value == null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function renderAlerts(alerts) {
+  const host = document.getElementById("alert-list");
+  host.replaceChildren();
+  if (!Array.isArray(alerts) || alerts.length === 0) {
+    host.hidden = true;
+    return;
+  }
+  for (const alert of alerts) {
+    const item = document.createElement("div");
+    item.className = `alert-chip ${alert.severity || "info"}`;
+    item.textContent = alert.message || alert.code || "Alert";
+    host.appendChild(item);
+  }
+  host.hidden = false;
+}
+
+function showError(message) {
+  const node = document.getElementById("config-error");
+  node.hidden = !message;
+  node.textContent = message || "";
+}
+
+function renderForm(configPayload) {
+  currentEffectiveConfig = configPayload.effective;
+  text("active-profile-name", configPayload.active_profile);
+  text("config-meta", `Config version ${configPayload.config_version || "-"} updated ${configPayload.updated_at || "never"}`);
+  const form = document.getElementById("energy-config-form");
+  form.replaceChildren();
+  for (const field of configFields) {
+    const label = document.createElement("label");
+    label.appendChild(document.createTextNode(field.label));
+    let input;
+    if (field.type === "select") {
+      input = document.createElement("select");
+      for (const optionValue of field.options) {
+        const option = document.createElement("option");
+        option.value = optionValue;
+        option.textContent = optionValue;
+        if (configPayload.effective[field.key] === optionValue) {
+          option.selected = true;
+        }
+        input.appendChild(option);
+      }
+    } else {
+      input = document.createElement("input");
+      input.type = field.type;
+      if (field.step) {
+        input.step = field.step;
+      }
+      if (field.type === "checkbox") {
+        input.checked = Boolean(configPayload.effective[field.key]);
+      } else {
+        input.value = configPayload.effective[field.key] ?? "";
+      }
+    }
+    input.name = field.key;
+    if (field.readonly) {
+      input.readOnly = true;
+      input.disabled = true;
+    }
+    label.appendChild(input);
+    form.appendChild(label);
+  }
+}
+
+async function fetchConfig() {
+  const response = await fetch(configUrl, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || "Failed to load energy config");
+  }
+  renderForm(payload);
+}
+
+async function fetchStatus() {
+  const response = await fetch(statusUrl, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to load energy status");
+  }
+  renderStatus(payload);
+}
+
+function renderStatus(payload) {
+  const charger = payload.charger || {};
+  const energy = payload.energy_status || {};
+  const telemetry = energy.telemetry || {};
+  const automation = payload.automation || {};
+  const state = automation.state || {};
+  const devices = state.device_status || {};
+  const database = payload.database || {};
+  const lastUpdated = new Date(payload.timestamp);
+  text("last-updated", Number.isNaN(lastUpdated.getTime()) ? payload.timestamp : lastUpdated.toLocaleTimeString());
+  text("action-note", energy.warning || (energy.is_emergency_mode ? "Emergency charging can import from grid and reduce Powerwall reserve." : "Controller is using cached Tesla telemetry plus predictive HVAC load adjustments."));
+  renderAlerts(payload.alerts);
+  showError("");
+
+  text("live-mode", energy.mode);
+  text("live-reason", energy.reason);
+  text("live-status", energy.action_status);
+  text("live-target", energy.desired_charger_enabled ? `${energy.desired_amps ?? "-"}A` : "off");
+  text("live-cooldown", energy.cooldown_remaining_seconds != null ? `${energy.cooldown_remaining_seconds}s` : "-");
+  text("live-command", energy.last_command_type ? `${energy.last_command_type} @ ${energy.last_command_at || "-"}` : "-");
+
+  text("tesla-telemetry-state", energy.telemetry_state);
+  text("tesla-solar", formatPower(telemetry.solar_watts));
+  text("tesla-home", formatPower(telemetry.house_consumption_watts));
+  text("tesla-adjusted", formatPower(energy.adjusted_consumption_watts));
+  text("tesla-powerwall", formatPercent(telemetry.powerwall_soc));
+  text("tesla-grid-import", formatPower(telemetry.grid_import_watts));
+  text("tesla-grid-export", formatPower(telemetry.grid_export_watts));
+  text("tesla-updated", telemetry.timestamp ? `${telemetry.timestamp} (${telemetry.age_seconds ?? "-"}s age)` : "-");
+
+  text("predictive-load", formatPower(energy.predictive_load_added_watts));
+  text("non-ev-load", formatPower(energy.non_ev_consumption_watts));
+  text("available-ev", formatPower(energy.computed_available_watts));
+  text("hvac-running", boolText(devices.hvac_running));
+  text("ev-estimate", formatPower(energy.estimated_current_ev_watts));
+
+  text("charger-mode", charger.mode);
+  text("charger-state", charger.state);
+  text("charger-connected", boolText(charger.vehicle_connected));
+  text("charger-active", boolText(charger.actively_charging));
+  text("charger-amps", charger.setpoint_amps != null ? `${charger.setpoint_amps}A` : "-");
+  text("charger-power", formatPower(charger.power_w));
+  text("charger-fetch", payload.fetch?.duration_ms != null ? `${payload.fetch.duration_ms}ms` : "-");
+  text("db-session-id", database.active_session_id || "-");
+  document.getElementById("raw-dps").textContent = JSON.stringify(payload.charger_dps || {}, null, 2);
+
+  const banner = document.getElementById("status-banner");
+  banner.hidden = true;
+  if (payload.stale) {
+    banner.hidden = false;
+    banner.className = "status-banner warn";
+    banner.textContent = "Showing cached controller status.";
+  }
+  if (payload.live_error) {
+    banner.hidden = false;
+    banner.className = "status-banner error";
+    banner.textContent = payload.live_error;
+  }
+}
+
+function collectConfigPayload() {
+  const form = document.getElementById("energy-config-form");
+  const payload = { active_profile: currentEffectiveConfig?.active_profile };
+  for (const field of configFields) {
+    const input = form.querySelector(`[name="${field.key}"]`);
+    if (!input) {
+      continue;
+    }
+    if (field.type === "checkbox") {
+      payload[field.key] = input.checked;
+    } else if (field.type === "number") {
+      payload[field.key] = input.value === "" ? null : Number(input.value);
+    } else {
+      payload[field.key] = input.value;
+    }
+  }
+  return payload;
+}
+
+async function postJson(url, method, payload) {
+  const response = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: payload ? JSON.stringify(payload) : null,
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || "Request failed");
+  }
+  return data;
+}
+
+document.getElementById("save-config").addEventListener("click", async () => {
+  try {
+    showError("");
+    await postJson(saveConfigUrl, "PUT", collectConfigPayload());
+    await Promise.all([fetchConfig(), fetchStatus()]);
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
+document.getElementById("reset-config").addEventListener("click", async () => {
+  try {
+    showError("");
+    await postJson(resetConfigUrl, "POST");
+    await Promise.all([fetchConfig(), fetchStatus()]);
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
+document.getElementById("emergency-start").addEventListener("click", async () => {
+  try {
+    showError("");
+    const amps = currentEffectiveConfig?.emergency_charge_amps ?? 32;
+    await postJson(emergencyStartUrl, "POST", { amps });
+    await Promise.all([fetchConfig(), fetchStatus()]);
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
+document.getElementById("emergency-stop").addEventListener("click", async () => {
+  try {
+    showError("");
+    await postJson(emergencyStopUrl, "POST");
+    await Promise.all([fetchConfig(), fetchStatus()]);
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
+(async function init() {
+  try {
+    await Promise.all([fetchConfig(), fetchStatus()]);
+  } catch (error) {
+    showError(error.message);
+  }
+  window.setInterval(async () => {
+    try {
+      await fetchStatus();
+    } catch (error) {
+      showError(error.message);
+    }
+  }, 15000);
+})();
+</script>
+{% endblock %}

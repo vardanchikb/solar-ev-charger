@@ -1,0 +1,15 @@
+[Unit]
+Description=CarCharger Automation Controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/carcharger
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/carcharger/.venv/bin/python3 %h/carcharger/solar_ev_controller.py --config %h/carcharger/config.yaml --run-auto
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

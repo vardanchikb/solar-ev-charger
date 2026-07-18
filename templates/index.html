@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card intro">
+  <p class="eyebrow">Local Control</p>
+  <h2>Monitor automation and configure charging</h2>
+  <p class="muted">Use the dashboard for live status and emergency override, edit charger profiles, or manage system integrations.</p>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('dashboard_page') }}">Open Dashboard</a>
+    <a class="btn alt" href="{{ url_for('sessions_page') }}">Charging Sessions</a>
+    <a class="btn alt" href="{{ url_for('charger_page') }}">Charger Profiles</a>
+    <a class="btn alt" href="{{ url_for('system_page') }}">System Settings</a>
+  </div>
+</section>
+
+<section class="card intro">
+  <p class="eyebrow">Automation Rules</p>
+  <h2>Day profile, night charging, emergency override</h2>
+  <p class="muted">The controller blocks charging between 16:00 and 21:00, ramps by the midday solar profile, starts night charging after 21:00 if a car is connected, and lets emergency charging run until you stop it or the car stops charging.</p>
+  <div class="actions">
+    <a class="btn alt" href="{{ url_for('dashboard_page') }}">View Live Status</a>
+    <a class="btn alt" href="{{ url_for('sessions_page') }}">View Session History</a>
+  </div>
+</section>
+{% endblock %}

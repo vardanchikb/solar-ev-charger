@@ -1,0 +1,48 @@
+# Example Apache vhost for hosting the Tesla Fleet partner public key.
+#
+# It serves ONLY the /.well-known/ path that Tesla and Let's Encrypt need.
+# It deliberately does NOT proxy anything to the dashboard: the dashboard has
+# no authentication and must never be reachable from the public internet.
+#
+# Replace your-domain.example and the paths below to match your install.
+
+<VirtualHost *:80>
+    ServerName your-domain.example
+
+    Alias /.well-known/ /var/www/html/.well-known/
+    <Directory /var/www/html/.well-known>
+        Options FollowSymLinks
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    # Redirect everything that is not a validation file to HTTPS.
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteRule ^ https://your-domain.example%{REQUEST_URI} [R=301,L]
+
+    ErrorLog ${APACHE_LOG_DIR}/tesla_partner_error.log
+    CustomLog ${APACHE_LOG_DIR}/tesla_partner_access.log combined
+</VirtualHost>
+
+<IfModule mod_ssl.c>
+<VirtualHost *:443>
+    ServerName your-domain.example
+
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/your-domain.example/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/your-domain.example/privkey.pem
+
+    # Serve only the Tesla partner public key and ACME challenges.
+    # Do NOT add a ProxyPass to the dashboard here.
+    Alias /.well-known/ /var/www/html/.well-known/
+    <Directory /var/www/html/.well-known>
+        Options FollowSymLinks
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/tesla_partner_ssl_error.log
+    CustomLog ${APACHE_LOG_DIR}/tesla_partner_ssl_access.log combined
+</VirtualHost>
+</IfModule>

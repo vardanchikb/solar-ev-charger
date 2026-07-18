@@ -1,0 +1,15 @@
+[Unit]
+Description=CarCharger Dashboard Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/carcharger
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/carcharger/.venv/bin/python3 %h/carcharger/web_config.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

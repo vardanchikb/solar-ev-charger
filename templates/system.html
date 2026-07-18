@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="head-row">
+    <div>
+      <p class="eyebrow">System</p>
+      <h2>Hardware And Integration Settings</h2>
+    </div>
+    {% if saved %}<span class="saved">Saved</span>{% endif %}
+  </div>
+
+  <form method="post" class="grid">
+    <p class="section-title full">Aimiler / Tuya</p>
+
+    <label>Name<input type="text" name="name" value="{{ charger.get('name', '') }}" /></label>
+    <label>Local IP<input type="text" name="ip" required value="{{ charger.get('ip', '') }}" /></label>
+    <label class="full">Device ID<input type="text" name="id" required value="{{ charger.get('id', '') }}" /></label>
+    <label class="full">Local Key<input type="password" autocomplete="new-password" name="key" value="" placeholder="{% if charger.get('key') %}stored, blank keeps current{% else %}set Tuya local key{% endif %}" /></label>
+    <label>Tuya Version<input type="number" step="0.1" name="version" value="{{ charger.get('version', 3.4) }}" /></label>
+    <label>Switch DP<input type="number" name="switch_dp" value="{{ charger.get('switch_dp', 18) }}" /></label>
+    <label>Current DP<input type="number" name="current_dp" value="{{ charger.get('current_dp', 4) }}" /></label>
+    <label>Mode DP<input type="number" name="mode_dp" value="{{ charger.get('mode_dp', 14) }}" /></label>
+    <label>
+      Current Unit
+      <select name="current_unit">
+        <option value="amp" {% if charger.get('current_unit', 'amp') == 'amp' %}selected{% endif %}>amp</option>
+        <option value="deciamp" {% if charger.get('current_unit', 'amp') == 'deciamp' %}selected{% endif %}>deciamp</option>
+      </select>
+    </label>
+    <label>Min Hardware Amps<input type="number" name="min_amps" value="{{ charger.get('min_amps', 8) }}" /></label>
+    <label>Max Hardware Amps<input type="number" name="max_amps" value="{{ charger.get('max_amps', 32) }}" /></label>
+    <label>Voltage<input type="number" step="0.1" name="voltage" value="{{ charger.get('voltage', 230) }}" /></label>
+    <label>Phases<input type="number" name="phases" value="{{ charger.get('phases', 1) }}" /></label>
+    <label class="switch-row full">
+      <input type="checkbox" name="debug_tuya_responses" value="1" {% if charger.get('debug_tuya_responses', true) %}checked{% endif %} />
+      <span>
+        Debug Tuya Responses
+        <small>Collect raw local Tuya status and command responses in the debug log.</small>
+      </span>
+    </label>
+
+    <p class="section-title full">Local Integrations</p>
+    <label class="full">HVAC Status URL<input type="text" name="hvac_status_url" value="{{ system_profile.get('hvac_status_url', 'http://127.0.0.1:8789/api/hvac-status') }}" /></label>
+    <label>HVAC Timeout (s)<input type="number" name="hvac_timeout_seconds" value="{{ system_profile.get('hvac_timeout_seconds', 5) }}" /></label>
+    <label>HVAC Refresh (s)<input type="number" name="hvac_refresh_seconds" value="{{ system_profile.get('hvac_refresh_seconds', 120) }}" /></label>
+
+    <p class="section-title full">MySQL Session Logging</p>
+    <label>
+      Enable Logging
+      <select name="db_enabled">
+        <option value="true" {% if database.get('enabled', false) %}selected{% endif %}>enabled</option>
+        <option value="false" {% if not database.get('enabled', false) %}selected{% endif %}>disabled</option>
+      </select>
+    </label>
+    <label>
+      Auto Create DB/Table
+      <select name="db_bootstrap">
+        <option value="true" {% if database.get('bootstrap', true) %}selected{% endif %}>enabled</option>
+        <option value="false" {% if not database.get('bootstrap', true) %}selected{% endif %}>disabled</option>
+      </select>
+    </label>
+    <label class="full">MySQL Socket<input type="text" name="db_socket" value="{{ database.get('socket', '/run/mysqld/mysqld.sock') }}" /></label>
+    <label>Host<input type="text" name="db_host" value="{{ database.get('host', '127.0.0.1') }}" /></label>
+    <label>Port<input type="number" name="db_port" value="{{ database.get('port', 3306) }}" /></label>
+    <label>User<input type="text" name="db_user" value="{{ database.get('user', '') }}" /></label>
+    <label>Password<input type="password" autocomplete="new-password" name="db_password" value="" placeholder="{% if database.get('password_configured') %}stored, blank keeps current{% else %}set MySQL password{% endif %}" /></label>
+    <p class="muted full">Password file: <code>{{ database.get('password_file', '.secrets/mysql_password') }}</code> (path is fixed in config.yaml)</p>
+    {% if db_ping_ok is not none %}
+    <p class="muted full">Database connection: {% if db_ping_ok %}OK{% else %}<strong>FAILED</strong> — {{ db_ping_error }}{% endif %}</p>
+    {% endif %}
+    <label>Database<input type="text" name="db_name" value="{{ database.get('database', 'carcharger') }}" /></label>
+    <label>Table<input type="text" name="db_table" value="{{ database.get('table', 'charging_sessions') }}" /></label>
+    <label>Telemetry Table<input type="text" name="db_telemetry_table" value="{{ database.get('telemetry_table', 'charger_telemetry_samples') }}" /></label>
+
+    <p class="section-title full">Dashboard Access</p>
+    <label class="full">Dashboard Password<input type="password" autocomplete="new-password" name="dashboard_password" value="" placeholder="{% if dashboard_password_configured %}stored, blank keeps current{% else %}set to require login (recommended){% endif %}" /></label>
+    <p class="muted full">Protects every dashboard page and API with HTTP Basic Auth (any username). Stored in <code>.secrets/dashboard_password</code>.</p>
+
+    <p class="section-title full">Tesla Fleet Energy</p>
+    <label>
+      Enable Tesla Energy
+      <select name="tesla_enabled">
+        <option value="true" {% if tesla.get('enabled', false) %}selected{% endif %}>enabled</option>
+        <option value="false" {% if not tesla.get('enabled', false) %}selected{% endif %}>disabled</option>
+      </select>
+    </label>
+    <label>Client ID<input type="text" name="tesla_client_id" value="{{ tesla.get('client_id', '') }}" /></label>
+    <label class="full">Client Secret<input type="password" autocomplete="new-password" name="tesla_client_secret" value="" placeholder="{% if tesla.get('client_secret_configured') %}stored, blank keeps current{% else %}set Tesla client secret{% endif %}" /></label>
+    <label class="full">Redirect URI<input type="text" name="tesla_redirect_uri" value="{{ tesla.get('redirect_uri', 'http://localhost:5000/callback') }}" /></label>
+    <label class="full">Audience<input type="text" name="tesla_audience" value="{{ tesla.get('audience', 'https://fleet-api.prd.na.vn.cloud.tesla.com') }}" /></label>
+    <label class="full">API Base URL<input type="text" name="tesla_api_base_url" value="{{ tesla.get('api_base_url', 'https://fleet-api.prd.na.vn.cloud.tesla.com') }}" /></label>
+    <label>Energy Site ID<input type="text" name="tesla_energy_site_id" value="{{ tesla.get('energy_site_id', '') }}" /></label>
+    <label>Partner Domain<input type="text" name="tesla_partner_domain" value="{{ tesla.get('partner_domain', '') }}" /></label>
+    <label class="full">Partner Public Key File<input type="text" name="tesla_partner_public_key_file" value="{{ tesla.get('partner_public_key_file', '/var/www/tesla/.well-known/appspecific/com.tesla.3p.public-key.pem') }}" /></label>
+    <label>Poll Seconds<input type="number" name="tesla_poll_seconds" value="{{ tesla.get('poll_seconds', 60) }}" /></label>
+    <label>History Hours<input type="number" name="tesla_history_hours" value="{{ tesla.get('history_hours', 24) }}" /></label>
+    <label>Chart Max Points<input type="number" name="tesla_history_max_points" value="{{ tesla.get('history_max_points', 288) }}" /></label>
+    <label>Live Samples Table<input type="text" name="tesla_live_table" value="{{ tesla.get('live_table', 'tesla_energy_live_samples') }}" /></label>
+    <label>History Table<input type="text" name="tesla_history_table" value="{{ tesla.get('history_table', 'tesla_energy_history') }}" /></label>
+    <label class="full">Manual Refresh Token<input type="password" autocomplete="new-password" name="tesla_refresh_token" value="" placeholder="{% if tesla_status.get('authorized') %}refresh token stored, blank keeps current{% else %}paste refresh token{% endif %}" /></label>
+    <label class="full">Manual Authorization Code<input type="password" autocomplete="new-password" name="tesla_auth_code" value="" placeholder="optional OAuth code" /></label>
+
+    <div class="full auth-panel">
+      <div class="auth-copy">
+        <p class="muted">Tesla status: {% if tesla_status.get('authorized') %}authorized{% elif tesla.get('client_id') and tesla.get('client_secret_configured') %}ready for authorization{% else %}not configured{% endif %}</p>
+        {% if tesla_status.get('energy_site_id') %}<p class="muted">Detected energy site: <code>{{ tesla_status.get('energy_site_id') }}</code></p>{% endif %}
+        {% if tesla_status.get('last_updated') %}<p class="muted">Last Tesla update: <code>{{ tesla_status.get('last_updated') }}</code></p>{% endif %}
+        {% if tesla_status.get('partner_public_key_url') %}<p class="muted">Public key URL: <code>{{ tesla_status.get('partner_public_key_url') }}</code></p>{% endif %}
+        <p class="muted">Tesla DB status: {% if tesla_status.get('database_ready') %}ready{% else %}not ready{% endif %}</p>
+      </div>
+      <div class="actions">
+        {% if tesla_authorize_url %}
+          <a class="btn" href="{{ tesla_authorize_url }}" target="_blank" rel="noreferrer">Authorize Tesla Energy</a>
+        {% endif %}
+        <button class="btn alt" type="submit" name="tesla_register_partner" value="1">Register Partner Domain</button>
+      </div>
+    </div>
+
+    <label>Import Days<input type="number" name="tesla_import_days" value="90" /></label>
+
+    <div class="full actions">
+      <button class="btn" type="submit">Save System Settings</button>
+      <button class="btn alt" type="submit" name="tesla_import_history" value="1">Save And Import Tesla History</button>
+    </div>
+
+    <p class="muted full">Password status: {% if database.get('password_configured') %}configured in secret file{% else %}not configured{% endif %}</p>
+    <p class="muted full">Tesla secret status: {% if tesla.get('client_secret_configured') %}configured in secret file{% else %}not configured{% endif %}</p>
+    {% if tesla_state %}<p class="saved full">Tesla {{ tesla_state }}</p>{% endif %}
+    {% if tesla_error %}<p class="status-banner error full">{{ tesla_error }}</p>{% endif %}
+    {% if tesla_import_state %}<p class="saved full">{{ tesla_import_state }}</p>{% endif %}
+    {% if tesla_import_error %}<p class="status-banner error full">{{ tesla_import_error }}</p>{% endif %}
+  </form>
+</section>
+{% endblock %}

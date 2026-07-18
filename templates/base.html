@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ title or "Aimiler Charger Dashboard" }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="bg-shape a"></div>
+  <div class="bg-shape b"></div>
+  <main class="shell">
+    <header class="topbar">
+      <h1>Aimiler Charger Dashboard</h1>
+      <nav>
+        <a href="{{ url_for('index') }}">Home</a>
+        <a href="{{ url_for('dashboard_page') }}">Dashboard</a>
+        <a href="{{ url_for('sessions_page') }}">Sessions</a>
+        <a href="{{ url_for('charger_page') }}">Charger</a>
+        <a href="{{ url_for('system_page') }}">System</a>
+      </nav>
+    </header>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
