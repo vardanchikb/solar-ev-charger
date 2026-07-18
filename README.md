@@ -192,3 +192,7 @@ automation:
 ```
 
 When `is_running` and `is_cooling` are both `true`, the controller treats HVAC as an active shared load. Heating does not affect EV charging. When cooling is active, any non-emergency EV charging decision is reduced to the automation safety minimum. Emergency charging remains exempt from these shared-load limits. Set `allow_when_hvac_unavailable: false` only if you want missing HVAC data to block automated charging.
+
+## License
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). You are free to use, copy, modify, and share this software for any **noncommercial** purpose. Commercial use — anything intended for or directed toward commercial advantage or monetary compensation — is not permitted under this license. Contact the author for commercial licensing.
